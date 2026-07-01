@@ -6,10 +6,22 @@
 """
 
 import json
+import re
+
 from agent_core import ModelRegistry, AgentResult
 from agent_digester.agents.base import DigesterAgent
 from agent_digester.core.output import DigestedOutput, SkeletonPoint
 from agent_digester.models.profile import UserProfile
+
+
+def _extract_json(text: str) -> str:
+    """从LLM响应中提取JSON，处理```json...```代码块包裹"""
+    text = text.strip()
+    # 去除 ```json ... ``` 包裹
+    m = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return text
 
 
 class SixLayerRestructurer(DigesterAgent):
@@ -43,9 +55,10 @@ class SixLayerRestructurer(DigesterAgent):
             max_tokens=4096,
         )
 
-        # 解析输出
+        # 解析输出（处理```json代码块包裹）
         try:
-            data = json.loads(response)
+            clean_json = _extract_json(response)
+            data = json.loads(clean_json)
             output = DigestedOutput(
                 core_analogy=data.get("core_analogy", ""),
                one_line_essence=data.get("one_line_essence", ""),
@@ -89,6 +102,8 @@ class SixLayerRestructurer(DigesterAgent):
 
     def _default_prompt(self):
         system = """你是认知消化专家。将输入内容重写为六层结构。
+
+⚠️ 重要：直接返回纯JSON，不要用```json ... ```包裹，不要加任何前缀说明。
 
 你需要输出严格的JSON格式，包含以下字段：
 

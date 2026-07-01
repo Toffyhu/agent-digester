@@ -43,11 +43,30 @@ class DigesterAgent(CoreBaseAgent):
 
         profile_hint = ""
         if self.profile:
+            # 安全获取 enum value（兼容字符串和枚举）
+            def ev(v):
+                return v.value if hasattr(v, 'value') else str(v)
+            
+            cs = ev(self.profile.cognitive_style)
+            dp = ev(self.profile.density_preference)
+            tc = ev(self.profile.thinking_channel)
+            
+            style_map = {
+                'inductive': '先案例再规律', 'deductive': '先规律再案例',
+                'mixed': '灵活切换',
+            }
+            density_map = {
+                'high': '精简浓缩', 'medium': '适中', 'low': '娓娓道来',
+            }
+            channel_map = {
+                'verbal': '多用文字', 'visual': '多用画面', 'mixed': '图文并茂',
+            }
+            
             profile_hint = f"""
 ## 👤 用户画像（输出风格指导）
-- 认知风格: {self.profile.cognitive_style.value}（{'先案例再规律' if self.profile.cognitive_style.value == 'inductive' else '先规律再案例' if self.profile.cognitive_style.value == 'deductive' else '灵活切换'}）
-- 密度偏好: {self.profile.density_preference.value}（{'精简浓缩' if self.profile.density_preference.value == 'high' else '适中' if self.profile.density_preference.value == 'medium' else '娓娓道来'}）
-- 思维通道: {self.profile.thinking_channel.value}（{'多用文字' if self.profile.thinking_channel.value == 'verbal' else '多用画面' if self.profile.thinking_channel.value == 'visual' else '图文并茂'}）
+- 认知风格: {cs}（{style_map.get(cs, cs)}）
+- 密度偏好: {dp}（{density_map.get(dp, dp)}）
+- 思维通道: {tc}（{channel_map.get(tc, tc)}）
 - 已知领域: {', '.join(self.profile.knowledge_topography) if self.profile.knowledge_topography else '未知'}
 """
 
