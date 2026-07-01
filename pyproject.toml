@@ -1,0 +1,36 @@
+[project]
+name = "agent-digester"
+version = "0.1.0"
+description = "认知消化工具 — 基于认知科学的六层内容转换引擎"
+requires-python = ">=3.11"
+dependencies = [
+    "agent-core>=0.1.0",
+    "openai>=1.0.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+translator = [
+    "agent-translator>=0.1.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.5.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent_digester"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
