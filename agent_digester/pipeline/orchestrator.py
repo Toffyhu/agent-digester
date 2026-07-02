@@ -225,7 +225,7 @@ def rule_extract_l4(simplified_text: str, assessment: dict, concept_map: list = 
                 corr = cm.get("correction", "")
                 
                 if mc and corr:  # 有纠偏 → 纠偏式要点
-                    content = f"❌ 别以为{term}={mc[:40]}。实际上，{corr[:60]}"
+                    content = f"{corr[:60]}"
                 else:
                     content = cm.get("白话", "")[:70]
                 
