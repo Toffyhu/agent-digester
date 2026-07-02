@@ -7,7 +7,12 @@
 import asyncio, os, sys, json, time, re, yaml, hashlib
 from pathlib import Path
 
-os.environ["DEEPSEEK_API_KEY"] = "sk-f4c4d8f3ed9e4b1cbd85a2aabb7eea63"
+# ⚠️ 安全的API Key加载方式：从环境变量读取，不硬编码
+_DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+if not _DEEPSEEK_KEY or _DEEPSEEK_KEY.startswith("sk-") is False:
+    print("⚠️ 请设置环境变量 DEEPSEEK_API_KEY 后再运行")
+    print("   export DEEPSEEK_API_KEY='你的DeepSeek API Key'")
+    sys.exit(1)
 
 sys.path.insert(0, "/workspace")
 from agent_digester import DigestionPipeline
