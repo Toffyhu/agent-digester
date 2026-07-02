@@ -107,10 +107,24 @@ def rule_assess(text: str) -> dict:
 # ═══════════════════════════════════════
 
 def rule_assemble(simplified_text: str, analogy: dict, assessment: dict, hook: dict) -> dict:
-    """规则层六层组装 — 模板拼接，零API调用"""
+    """规则层六层组装 — 模板拼接，零API调用
+    
+    v0.3.1 修复: L1不再使用原文截取，改为从简化文本取第一句精要
+    """
+    # L1: 从简化文本取精要，而非原文截取
+    sentences = re.split(r'[。！？]', simplified_text)
+    essence = ""
+    for s in sentences:
+        s = s.strip()
+        if len(s) > 10 and len(s) < 100:  # 取第一个有意义的完整句子
+            essence = s
+            break
+    if not essence:
+        essence = simplified_text[:100]
+    
     return {
         "layer0_analogy": analogy.get("analogy_scene", ""),
-        "layer1_essence": assessment.get("core_thesis", "核心概念待提炼"),
+        "layer1_essence": essence,
         "layer2_why": _gen_layer2(analogy, assessment),
         "layer3_entry": _gen_layer3(analogy),
         "layer4_skeleton": rule_extract_l4(simplified_text, assessment),
