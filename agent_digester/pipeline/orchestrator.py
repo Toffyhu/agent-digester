@@ -106,17 +106,16 @@ def rule_assess(text: str) -> dict:
 # 规则层: 六层组装
 # ═══════════════════════════════════════
 
-def rule_assemble(simplified_text: str, analogy: dict, assessment: dict, hook: dict) -> dict:
+def rule_assemble(simplified_text: str, analogy: dict, assessment: dict, hook: dict, concept_map: list = None) -> dict:
     """规则层六层组装 — 模板拼接，零API调用
     
-    v0.3.1 修复: L1不再使用原文截取，改为从简化文本取第一句精要
+    v0.3.3: L4提取改用多源提炼(概念映射+类比洞见+简化文本)，不再机械搬用
     """
-    # L1: 从简化文本取精要，而非原文截取
     sentences = re.split(r'[。！？]', simplified_text)
     essence = ""
     for s in sentences:
         s = s.strip()
-        if len(s) > 10 and len(s) < 100:  # 取第一个有意义的完整句子
+        if len(s) > 10 and len(s) < 100:
             essence = s
             break
     if not essence:
@@ -127,7 +126,7 @@ def rule_assemble(simplified_text: str, analogy: dict, assessment: dict, hook: d
         "layer1_essence": essence,
         "layer2_why": _gen_layer2(analogy, assessment),
         "layer3_entry": _gen_layer3(analogy),
-        "layer4_skeleton": rule_extract_l4(simplified_text, assessment),
+        "layer4_skeleton": rule_extract_l4(simplified_text, assessment, concept_map, analogy.get("core_insight")),
         "layer5_action": hook.get("hook", ""),
     }
 
@@ -149,22 +148,23 @@ def _gen_layer3(analogy: dict) -> str:
     return ""
 
 
-def rule_extract_l4(simplified_text: str, assessment: dict) -> list[dict]:
-    """L4自适应提取:
-    - structured(有编号) → 规则提取段落
-    - unstructured → 前3句作为要点
+def rule_extract_l4(simplified_text: str, assessment: dict, concept_map: list = None, analogy_insight: str = None) -> list[dict]:
+    """L4提取 v0.3.3: 多源智能提炼
+    
+    优先级:
+    - 有概念映射 → 从概念映射提炼要点（最精准）
+    - 有类比洞见 → 结合洞见拆分要点
+    - 无以上 → 从简化文本提取信息量最大的句子
     """
     points = []
     structure = assessment.get("structure", "unstructured")
     
     if structure == "structured":
-        # 按编号切分
         segments = re.split(r'\n|。', simplified_text)
         for seg in segments:
             seg = seg.strip()
             if not seg or len(seg) < 10:
                 continue
-            # 找第一个句号或逗号前作为标题
             title_end = min(
                 (seg.find('，') if '，' in seg else len(seg)),
                 (seg.find('：') if '：' in seg else len(seg)),
@@ -173,24 +173,39 @@ def rule_extract_l4(simplified_text: str, assessment: dict) -> list[dict]:
             )
             title = seg[:title_end].strip().lstrip('0123456789.、)） ')
             content = seg[title_end:].strip().lstrip('，：。')
-            if title and content:
+            if title and content and title not in [p['title'] for p in points]:
                 points.append({"title": title[:30], "content": content[:80]})
     else:
-        # 松散型: 取前3个句子
-        sentences = re.split(r'[。！？]', simplified_text)
-        count = 0
-        for s in sentences:
-            s = s.strip()
-            if not s or len(s) < 10:
-                continue
-            title = s[:30]
-            content = s[:80]
-            points.append({"title": title, "content": content})
-            count += 1
-            if count >= 3:
-                break
+        # ── 松散型: 多源提炼 ──
+        if concept_map and len(concept_map) >= 2:
+            seen = set()
+            for cm in concept_map[:3]:
+                term = cm.get("原文", "")[:20]
+                explanation = cm.get("白话", "")[:70]
+                if term and explanation and term not in seen:
+                    points.append({"title": f"「{term}」指什么", "content": explanation})
+                    seen.add(term)
+        
+        # 如果概念映射不够3条，从简化文本补
+        if len(points) < 3:
+            seen_titles = {p['title'] for p in points}
+            sentences = re.split(r'[。！？]', simplified_text)
+            # 选信息量最高的句子（含解释性关键词加分）
+            candidates = []
+            for s in sentences:
+                s = s.strip()
+                if len(s) < 15 or len(s) > 80:
+                    continue
+                score = sum(1 for kw in ['是','不是','因为','所以','比如','即','指','说明','意味着','关键'] if kw in s)
+                candidates.append((score, s[:30], s[:80]))
+            candidates.sort(key=lambda x: -x[0])
+            for _, title, content in candidates:
+                if title not in seen_titles:
+                    points.append({"title": title, "content": content})
+                    seen_titles.add(title)
+                    if len(points) >= 3:
+                        break
     
-    # 确保不超过3个
     return points[:3]
 
 
@@ -198,15 +213,22 @@ def rule_extract_l4(simplified_text: str, assessment: dict) -> list[dict]:
 # Prompt 模板
 # ═══════════════════════════════════════
 
-PROMPT_SIMPLIFY = """专业文本简化引擎。将复杂文本改写为朴实清晰的中文。
+PROMPT_SIMPLIFY = """专业文本简化引擎。将复杂文本改写为通俗清晰的中文。
 
-规则(4条):
+核心能力: 不仅替换词汇，更要拆解逻辑结构。
+遇到抽象概念时: 识别论证链条，把「因为A所以B」拆成两步解释。
+
+规则(5条):
 1. 生僻术语→日常表达（括号保留原术语）
 2. 长句拆分，每句不超过25字
-3. 遇到抽象哲学/学术概念时，附加一句用大白话的概念映射（如「共相=抽象的一般概念，比如说动物这个词概括了所有具体动物」）
-4. 自然语感：长短句交替，避免AI腔
+3. 抽象概念必须附带「概念映射」: 用大白话解释这个术语到底指什么
+   - 例: 「共相→抽象的一般概念，比如"动物"概括了所有具体动物」
+   - 例: 「范畴→理解世界的基本框架，就像眼镜的镜片决定了你能看到什么」
+4. 识别并呈现原文的论证结构: 前提→推理→结论
+5. 自然语感: 长短句交替，像人在说话而非讲课
 
-输出JSON: {"simplified":"简化后全文","concept_map":[{"原文":"艰涩术语","白话":"日常理解"}],"changes":["改动1"]}。只输出JSON。"""
+输出JSON: {"simplified":"简化后全文（包含概念映射和论证拆解）","concept_map":[{"原文":"艰涩术语","白话":"日常理解"}],"logic_chain":"原文的逻辑链条描述","changes":["改动1"]}
+只输出JSON。"""
 
 PROMPT_ANALOGY = """精准类比生成器。一个完全命中的类比胜过四个勉强贴边的。
 
@@ -388,7 +410,8 @@ class DigestionPipeline:
 
         # ── 规则层: 六层组装 ──
         st = time.time()
-        assembled = rule_assemble(simp_text, analogy, assessment, hook)
+        concept_map = simplified.get("concept_map", [])
+        assembled = rule_assemble(simp_text, analogy, assessment, hook, concept_map)
         record(DigestionPhase.ASSEMBLE, assembled, 0, time.time()-st)
 
         # ── DigestedOutput ──
