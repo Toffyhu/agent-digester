@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio, json, re, time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Callable
+from typing import Optional, Callable, Literal
 
 from agent_core import ModelRegistry
 from agent_digester.core.output import DigestedOutput, SkeletonPoint
@@ -32,6 +32,13 @@ class DigestionPhase(str, Enum):
     ANALOGY = "analogy"
     HOOK = "hook"
     ASSEMBLE = "assemble"
+
+
+DigestionLevel = Literal["literal", "summary", "explain", "naive"]
+# literal:  原文直译 — 只做格式清洁，不加工
+# summary:  精要提炼 — 保留术语但压缩逻辑链
+# explain:  通俗解读 — 保留类比但用白话（原popular）
+# naive:    入门类比 — 零术语，一个类比贯穿全文，不讲概念只讲故事
 
 
 @dataclass
@@ -490,6 +497,88 @@ class DigestionPipeline:
 
     def digest_sync(self, text, title="", **kw):
         return asyncio.run(self.digest(text=text, title=title, **kw))
+
+    async def digest_leveled(
+        self, text: str, title="", level: DigestionLevel = "explain",
+        source_lang="zh", source_type="article",
+        on_phase_complete=None,
+    ):
+        """四档难度消化
+
+        - literal:  原文直译 — 清洁格式+长句拆分，不解释
+        - summary:  精要提炼 — 去冗余+保留术语+保留逻辑链
+        - explain:  通俗解读 — 保留类比+白话+纠正误解 (popular层)
+        - naive:    入门类比 — 零术语，一个类比讲完核心，不讲概念只讲画面
+        """
+        from agent_digester.pipeline.orchestrator import _Agent, rule_assess
+
+        if level == "literal":
+            # 零Agent：只做规则层处理
+            return await self._level_literal(text, title, source_type)
+        elif level == "summary":
+            return await self._level_summary(text, title, source_type)
+        elif level == "naive":
+            return await self._level_naive(text, title, source_type)
+        else:
+            # explain = 默认，走现有digest逻辑
+            return await self.digest(text=text, title=title, source_lang=source_lang,
+                                     source_type=source_type, on_phase_complete=on_phase_complete)
+
+    async def _level_literal(self, text, title, source_type):
+        """原文直译 — 不调用LLM，只做规则层"""
+        import time
+        t0 = time.time()
+        assessment = rule_assess(text)
+        sentences = re.split(r'[。！？]', text)
+        lines = []
+        for s in sentences:
+            s = s.strip().lstrip('0123456789.、)） ')
+            if s: lines.append(s)
+        cleaned = "。".join(lines)
+        parts = [f"# {title}", "", cleaned]
+        article = "\n".join(parts)
+        o = DigestedOutput(one_line_essence=assessment.get("core_thesis"), source_title=title)
+        return DigestionResult(success=True, total_duration_seconds=time.time()-t0,
+                              final_output=o, summary="[literal] 原文直译")
+
+    async def _level_summary(self, text, title, source_type):
+        """精要提炼 — 一次LLM调用，保留术语但三句话讲完核心逻辑"""
+        import time
+        from agent_digester.pipeline.orchestrator import _Agent, PROMPT_SIMPLIFY, rule_assess
+        t0 = time.time()
+        reg = self.registry
+        assessment = rule_assess(text)
+        agent = _Agent(reg, "s1_simplify", PROMPT_SIMPLIFY)
+        resp, cost = agent.execute(f"提取核心逻辑链，精炼为3-5句话。保留关键术语。去掉一切例子和冗余。\n{text[:5000]}", 0.3)
+        o = DigestedOutput(one_line_essence=resp[:200], source_title=title, source_type=source_type)
+        return DigestionResult(success=True, total_duration_seconds=time.time()-t0,
+                              total_cost_usd=cost, final_output=o,
+                              summary=f"[summary] 精要提炼 | {time.time()-t0:.1f}s")
+
+    async def _level_naive(self, text, title, source_type):
+        """入门类比 — 零术语，一个类比讲完核心，不讲概念只讲故事"""
+        import time
+        from agent_digester.pipeline.orchestrator import _Agent, rule_assess
+
+        NAIVE_PROMPT = """想象你要把下面这段文字的核心思想讲给一个12岁的孩子听。
+
+        规则：
+        1. 不用任何专业术语
+        2. 用一个完整的日常故事或场景来讲述核心思想
+        3. 不要出现「这个概念」「这个现象」这类词
+        4. 用一个人物或一个具体事例开始
+        5. 结尾一句话点破「所以这个故事说明了什么」
+
+        直接写，不需要任何前缀说明。200-300字。"""
+
+        reg = self.registry
+        t0 = time.time()
+        agent = _Agent(reg, "s1_simplify", NAIVE_PROMPT)
+        resp, cost = agent.execute(f"需要解释的内容:\n{text[:3000]}", 0.6, 1024)
+        o = DigestedOutput(one_line_essence=resp[:200], source_title=title, source_type=source_type)
+        return DigestionResult(success=True, total_duration_seconds=time.time()-t0,
+                              total_cost_usd=cost, final_output=o,
+                              summary=f"[naive] 入门类比 | {time.time()-t0:.1f}s")
 
     def _summary(self, phases, cost, duration, rule_time):
         lns = ["="*50, "  认知消化 v0.3 | 3Agent+规则层", "="*50,
