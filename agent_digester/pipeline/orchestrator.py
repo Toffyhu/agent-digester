@@ -501,26 +501,27 @@ class DigestionPipeline:
     async def digest_leveled(
         self, text: str, title="", level: DigestionLevel = "explain",
         source_lang="zh", source_type="article",
+        profile: Optional[UserProfile] = None,
         on_phase_complete=None,
     ):
-        """四档难度消化
+        """四档难度消化 — v0.4.1 画像驱动版
 
-        - literal:  原文直译 — 清洁格式+长句拆分，不解释
-        - summary:  精要提炼 — 去冗余+保留术语+保留逻辑链
-        - explain:  通俗解读 — 保留类比+白话+纠正误解 (popular层)
-        - naive:    入门类比 — 零术语，一个类比讲完核心，不讲概念只讲画面
+        - literal:  原文直译 — 零LLM, 规则层清洗
+        - summary:  精要提炼 — 1次LLM, 保留术语压缩逻辑链
+        - explain:  通俗解读 — 3Agent完整管线, 受画像影响
+        - naive:    入门类比 — 零术语, 一个类比讲完核心, 受画像影响类比域
         """
-        from agent_digester.pipeline.orchestrator import _Agent, rule_assess
+        self.profile = profile or self.profile
 
         if level == "literal":
-            # 零Agent：只做规则层处理
             return await self._level_literal(text, title, source_type)
         elif level == "summary":
             return await self._level_summary(text, title, source_type)
         elif level == "naive":
             return await self._level_naive(text, title, source_type)
         else:
-            # explain = 默认，走现有digest逻辑
+            return await self.digest(text=text, title=title, source_lang=source_lang,
+                                     source_type=source_type, on_phase_complete=on_phase_complete)
             return await self.digest(text=text, title=title, source_lang=source_lang,
                                      source_type=source_type, on_phase_complete=on_phase_complete)
 
