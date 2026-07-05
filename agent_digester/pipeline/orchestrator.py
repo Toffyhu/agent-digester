@@ -544,13 +544,19 @@ class DigestionPipeline:
     async def _level_summary(self, text, title, source_type):
         """精要提炼 — 一次LLM调用，保留术语但三句话讲完核心逻辑"""
         import time
-        from agent_digester.pipeline.orchestrator import _Agent, PROMPT_SIMPLIFY, rule_assess
-        t0 = time.time()
+        from agent_digester.pipeline.orchestrator import _Agent, rule_assess
+
+        SUMMARY_PROMPT = """提取核心逻辑链，精炼为3-5句流畅的中文。规则:
+1. 保留关键术语
+2. 去掉一切例子和冗余
+3. 确保逻辑链完整（前提→推理→结论）
+直接输出中文文本，不要JSON，不要任何格式标记。"""
+
         reg = self.registry
-        assessment = rule_assess(text)
-        agent = _Agent(reg, "s1_simplify", PROMPT_SIMPLIFY)
-        resp, cost = agent.execute(f"提取核心逻辑链，精炼为3-5句话。保留关键术语。去掉一切例子和冗余。\n{text[:5000]}", 0.3)
-        o = DigestedOutput(one_line_essence=resp[:200], source_title=title, source_type=source_type)
+        t0 = time.time()
+        agent = _Agent(reg, "s1_simplify", SUMMARY_PROMPT)
+        resp, cost = agent.execute(f"{text[:5000]}", 0.3)
+        o = DigestedOutput(one_line_essence=resp.strip()[:300], source_title=title, source_type=source_type)
         return DigestionResult(success=True, total_duration_seconds=time.time()-t0,
                               total_cost_usd=cost, final_output=o,
                               summary=f"[summary] 精要提炼 | {time.time()-t0:.1f}s")
@@ -560,22 +566,30 @@ class DigestionPipeline:
         import time
         from agent_digester.pipeline.orchestrator import _Agent, rule_assess
 
-        NAIVE_PROMPT = """想象你要把下面这段文字的核心思想讲给一个12岁的孩子听。
+        # 从原文中提取可能的术语词作为禁词提示
+        jargon_words = set()
+        for w in re.split(r'[（）\(\)\s，。：；、""''！？\n]', text):
+            w = w.strip()
+            if len(w) >= 2 and len(w) <= 6:
+                jargon_words.add(w)
+        forbidden = "、".join(sorted(jargon_words, key=len, reverse=True)[:15])
+        
+        NAIVE_PROMPT = f"""想象你要把下面这段文字的核心思想讲给一个12岁的孩子听。
 
-        规则：
-        1. 不用任何专业术语
-        2. 用一个完整的日常故事或场景来讲述核心思想
-        3. 不要出现「这个概念」「这个现象」这类词
-        4. 用一个人物或一个具体事例开始
-        5. 结尾一句话点破「所以这个故事说明了什么」
+规则：
+1. 不出现任何专业术语。禁止使用这些词: {forbidden}
+2. 用一个完整的日常故事或场景来讲述核心思想
+3. 结尾一句话点破「所以这个故事说明了什么」
+4. 不要出现「这个概念」「这个现象」这类词
+5. 所有角色使用常见的中文名字(小明/小红/李叔叔)
 
-        直接写，不需要任何前缀说明。200-300字。"""
+直接写，不需要任何格式。200-300字。"""
 
         reg = self.registry
         t0 = time.time()
         agent = _Agent(reg, "s1_simplify", NAIVE_PROMPT)
         resp, cost = agent.execute(f"需要解释的内容:\n{text[:3000]}", 0.6, 1024)
-        o = DigestedOutput(one_line_essence=resp[:200], source_title=title, source_type=source_type)
+        o = DigestedOutput(one_line_essence=resp.strip()[:500], source_title=title, source_type=source_type)
         return DigestionResult(success=True, total_duration_seconds=time.time()-t0,
                               total_cost_usd=cost, final_output=o,
                               summary=f"[naive] 入门类比 | {time.time()-t0:.1f}s")
