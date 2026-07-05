@@ -9,6 +9,8 @@ from agent_digester.core.laws import IronLaw, generate_law_checklist, LAWS
 from agent_digester.core.output import DigestedOutput, SkeletonPoint
 from agent_digester.pipeline.orchestrator import DigestionPipeline, DigestionResult, DigestionLevel
 from agent_digester.agents.topic_scout import TopicScout, TopicResult, TopicCard
+from agent_digester.agents.verification import VerificationEngine
+from agent_digester.agents.truth_guardian import TruthGuardian
 from agent_digester.models.profile import UserProfile, CognitiveStyle
 
 __version__ = "0.4.0"
@@ -22,6 +24,8 @@ __all__ = [
     "TopicScout",
     "TopicResult",
     "TopicCard",
+    "VerificationEngine",
+    "TruthGuardian",
     "UserProfile",
     "CognitiveStyle",
     "IronLaw",
